@@ -38,22 +38,21 @@ static BOOL PrintErrorMessage(DWORD dwErrorCode)
 
 void* wrt_dlopen(const char *pcDllname)
 {
-  puts(pcDllname);
-    #if defined(_WIN32)
-      void* handle = (void*)LoadLibrary(pcDllname);
-      if(handle == NULL) {
-        printf("Error loading %s\n", pcDllname);
-        PrintErrorMessage(GetLastError());
-      }
-      return handle;
-    #elif defined(__GNUC__)
-      void* handle = dlopen(pcDllname, RTLD_DEFAULT);
-      if(handle == NULL) printf("Error loading %s. Reason %s\n", pcDllname, dlerror());
-      printf("Loaded posix plugin %s\n", pcDllname);
-      return handle;
-    #else
-      printf("Error: Native Plugin loading is not supported by platform\n");
-    #endif
+  #if defined(_WIN32)
+    void* handle = (void*)LoadLibrary(pcDllname);
+    if(handle == NULL) {
+      printf("Error loading %s\n", pcDllname);
+      PrintErrorMessage(GetLastError());
+    }
+    return handle;
+  #elif defined(__GNUC__)
+    void* handle = dlopen(pcDllname, RTLD_DEFAULT);
+    if(handle == NULL) printf("Error loading %s. Reason %s\n", pcDllname, dlerror());
+    printf("Loaded posix plugin %s\n", pcDllname);
+    return handle;
+  #else
+    printf("Error: Native Plugin loading is not supported by platform\n");
+  #endif
 }
 
 void *wrt_dlsym(void *Lib, char *Fnname)
