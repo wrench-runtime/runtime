@@ -7,6 +7,8 @@ project(wrench_runtime)
 
 add_subdirectory(thirdparty/stb_ds)
 add_subdirectory(thirdparty/wren)
+add_subdirectory(thirdparty/cwalk) 
+
 add_subdirectory(src)
 
 # if(EMSCRIPTEN)

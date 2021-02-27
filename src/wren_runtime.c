@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <assert.h>
-#include <wren.h>
 #include <string.h>
+#include <limits.h>
+
+#include <wren.h>
 
 #include <wren_runtime.h>
-
-#include "readfile.h"
 
 // CAUTION: Do this only once
 #define STB_DS_IMPLEMENTATION
@@ -13,8 +13,10 @@
 
 #include "os_call.h"
 #include "mutex.h"
+#include "modules.h"
 
 MUTEX mutex;
+const char* moduleRoot;
 
 typedef struct {
   char* key;
@@ -97,7 +99,7 @@ static char* getClassName(const char* module,
   return str;
 }
 
-static WrenForeignMethodFn bindMethodFunc( 
+static WrenForeignMethodFn bind_method_fn( 
   WrenVM* vm, 
   const char* module, 
   const char* className, 
@@ -113,7 +115,7 @@ static WrenForeignMethodFn bindMethodFunc(
   return func;
 }
 
-WrenForeignClassMethods bindClassFunc( 
+WrenForeignClassMethods bind_class_fn( 
   WrenVM* vm, 
   const char* module, 
   const char* className)
@@ -135,6 +137,8 @@ WrenForeignClassMethods bindClassFunc(
     return classBindings[index].value;
   }
 }
+
+
 
 void wrt_bind_method(const char* name, WrenForeignMethodFn func){
   shput(bindings, name, func);
@@ -205,6 +209,7 @@ static int plugin_id = 1;
 #define LoadPluginAssert(assert, msg) if(!(assert)){ puts(msg); goto DONE; }
 
 static void register_plugin(const char* name, WrtPluginInitFunc init){
+  printf("Register Plugin %s\n", name);
   BinaryModuleData md;
   md.wrenInitFunc = init(plugin_id++);
   shput(binaryModules, name, md);
@@ -228,10 +233,6 @@ static void load_plugin(WrenVM* vm, const char * pluginname, const char * dllnam
 
   int index = shgeti(binaryModules, pluginname);
   if(index == -1){
-    FILE* f = fopen(name, "rb");
-    
-    if(f == NULL) goto DONE;
-    else fclose(f);
     printf("Load dynamic binary module '%s'\n", pluginname);
     void* handle = wrt_dlopen(name);
     LoadPluginAssert(handle != NULL, "Could not open binary plugin");
@@ -240,7 +241,7 @@ static void load_plugin(WrenVM* vm, const char * pluginname, const char * dllnam
     strcat(namebuffer, pluginname);
     WrenForeignMethodFn (*initFunc)(int handle) = wrt_dlsym(handle, namebuffer);
     LoadPluginAssert(initFunc != NULL, "Did not find init entry point in binary plugin");
-    
+
     register_plugin(pluginname, initFunc);
     index = shgeti(binaryModules, pluginname);
   }
@@ -260,40 +261,59 @@ static void load_plugin(WrenVM* vm, const char * pluginname, const char * dllnam
 
 static WrenLoadModuleResult load_module_fn(WrenVM* vm, const char* name){
   WrenLoadModuleResult result = {0};
+  const char* script;
 
   if(strcmp(name, "random") == 0 || strcmp(name, "meta") == 0){
     return result;
   }
 
-  char strbuffer[4096];
-  char dllbuffer[4096];
-
-  //file
-  if(name[0] == '.'){
-    strcpy(strbuffer, name);
-    strcat(strbuffer, ".wren");
-  }
-  //module
-  else {
-    strcpy(strbuffer, "./wren_modules/");
-    strcat(strbuffer, name);
-    strcpy(dllbuffer, strbuffer);
-    #if defined(_WIN32)
-    strcat(dllbuffer, ".dll");
-    #elif defined(__EMSCRIPTEN__)
-    strcat(dllbuffer, ".wasm");
-    #elif defined(__unix__)
-    strcat(dllbuffer, ".so");
-    #endif
-    load_plugin(vm, name, dllbuffer);
-    strcat(strbuffer, ".wren");
-  }
-
-  const char * string = read_file_string(strbuffer);
-
-  //result.onComplete = loadModuleComplete;
-  result.source = string;
+  if(wrt_is_file_module(name)){
+    if(wrt_file_exists(name)){
+      script = wrt_read_file(name);
+    }
+  } else {
+    const char* module_path = wrt_resolve_installed_module(&moduleRoot, 1, name);
+    printf("Resolved installed module at %s\n", module_path);
+    if(wrt_file_exists(module_path)){
+      script = wrt_read_file(module_path);
+    }
+    
+    const char* binary_path = wrt_resolve_binary_module(module_path);
+    free((void*)module_path);
+    printf("Load binary %s\n", binary_path);
+    if(wrt_file_exists(binary_path)){
+      load_plugin(vm, name, binary_path);
+    }
+    free((void*)binary_path);
+  } 
+  result.source = script;
   return result;
+}
+
+static const char* resolve_module_fn(WrenVM* vm, const char* importer, const char* name){
+
+  if(strcmp(name, "random") == 0 || strcmp(name, "meta") == 0){
+    return name;
+  }
+
+  const char* resolved;
+  if(wrt_is_file_module(name)){
+    resolved = wrt_resolve_file_module(importer, name);
+  } else {
+    resolved = name;
+  }
+
+  printf("Resolved: Importer: %s, Module: %s\n", importer, resolved);
+  return resolved;
+}
+
+void wrt_run_main(WrenVM* vm, const char* main){
+  const char* script = wrt_read_file(main);
+  if(script == NULL) return;
+  WrenInterpretResult result = wrenInterpret(vm, main, script);
+  if(result == WREN_RESULT_SUCCESS){
+    wrt_call_update_callbacks(vm);
+  }
 }
 
 WrenVM* wrt_new_wren_vm(bool isMain){
@@ -303,8 +323,9 @@ WrenVM* wrt_new_wren_vm(bool isMain){
   config.errorFn = error_fn;
   config.writeFn = write_fn;
   config.loadModuleFn = load_module_fn;
-  config.bindForeignMethodFn = bindMethodFunc;
-  config.bindForeignClassFn = bindClassFunc;
+  config.bindForeignMethodFn = bind_method_fn;
+  config.bindForeignClassFn = bind_class_fn;
+  config.resolveModuleFn = resolve_module_fn;
   //config.initialHeapSize = 1024 * 1024 * 100;
   // config.minHeapSize = 1024 * 512;
   // config.heapGrowthPercent = 15;
@@ -315,6 +336,7 @@ WrenVM* wrt_new_wren_vm(bool isMain){
   return vm;
 }
 
-void wrt_init(){
+void wrt_init(const char* mRoot){
+  moduleRoot = mRoot;
   MUTEX_INIT(&mutex);
 }

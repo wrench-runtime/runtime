@@ -1,3 +1,6 @@
 [submodule "wren"]
 	path = thirdparty/wren/wren
 	url = https://github.com/wren-lang/wren.git
+[submodule "thirdparty/cwalk"]
+	path = thirdparty/cwalk
+	url = https://github.com/likle/cwalk.git
