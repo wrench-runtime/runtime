@@ -261,7 +261,7 @@ static void load_plugin(WrenVM* vm, const char * pluginname, const char * dllnam
 
 static WrenLoadModuleResult load_module_fn(WrenVM* vm, const char* name){
   WrenLoadModuleResult result = {0};
-  const char* script;
+  const char* script = NULL;
 
   if(strcmp(name, "random") == 0 || strcmp(name, "meta") == 0){
     return result;
@@ -273,6 +273,7 @@ static WrenLoadModuleResult load_module_fn(WrenVM* vm, const char* name){
     }
   } else {
     const char* module_path = wrt_resolve_installed_module(&moduleRoot, 1, name);
+    if(module_path == NULL) return result;
     printf("Resolved installed module at %s\n", module_path);
     if(wrt_file_exists(module_path)){
       script = wrt_read_file(module_path);

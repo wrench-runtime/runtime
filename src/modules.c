@@ -74,7 +74,7 @@ const char* wrt_resolve_installed_module(const char** locations, int num_locatio
       return result;
     }
   }
-  return name;
+  return NULL;
 }
 
 const char* wrt_resolve_binary_module(const char* path){
